@@ -1,0 +1,769 @@
+"""
+visualizer.py
+=============
+Graphical visualization and animation tools for the Sand Drawer Puzzle:
+1. Matplotlib Animation & GIF generator
+2. Interactive standalone HTML5/JS Dashboard
+"""
+
+import os
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import matplotlib.animation as animation
+from typing import List, Tuple, Optional
+from environment import State, Action
+from search_algorithms import SearchResult
+
+def render_state_on_ax(ax, state: State, action: Optional[Action] = None, step_cost: float = 0.0,
+                        total_cost: float = 0.0, step_num: int = 0, total_steps: int = 0):
+    """
+    Render a single state of the Sand Drawer on a matplotlib Axes.
+    """
+    ax.clear()
+    R = state.rows
+    ax.set_xlim(-0.5, 2.5)
+    ax.set_ylim(-0.8, R + 0.5)
+    ax.invert_yaxis() # Row 0 at top, row R-1 at bottom
+    ax.set_aspect('equal')
+    ax.axis('off')
+
+    # Draw outer frame of drawer
+    outer_rect = patches.Rectangle((-0.05, -0.05), 2.1, R + 0.1, linewidth=3, edgecolor='#1e293b', facecolor='#f8fafc')
+    ax.add_patch(outer_rect)
+
+    # Color palette
+    color_empty = '#f1f5f9'
+    color_half = '#f59e0b'  # amber
+    color_full = '#d97706'  # dark amber/orange
+
+    for r in range(R):
+        for c in range(2):
+            val = state.col0[r] if c == 0 else state.col1[r]
+            x = c
+            y = r
+
+            # Cell background
+            cell_bg = patches.Rectangle((x, y), 1.0, 1.0, linewidth=1, edgecolor='#cbd5e1', facecolor=color_empty)
+            ax.add_patch(cell_bg)
+
+            # Sand fill
+            if val > 0.0:
+                h = val # 0.5 or 1.0
+                sand_color = color_half if val == 0.5 else color_full
+                # Sand fills from bottom of cell: y + (1 - h) to y + 1
+                sand_rect = patches.Rectangle((x + 0.05, y + (1.0 - h) + 0.05), 0.9, h - 0.1,
+                                              linewidth=0, facecolor=sand_color, alpha=0.9)
+                ax.add_patch(sand_rect)
+
+            # Cell text
+            label = "1.0" if val == 1.0 else ("½" if val == 0.5 else "0")
+            font_color = '#ffffff' if val >= 0.5 else '#64748b'
+            ax.text(x + 0.5, y + 0.5, label, ha='center', va='center',
+                    fontsize=14, fontweight='bold', color=font_color)
+
+        # Gate between col 0 and col 1 at row r (side gate)
+        side_color = '#94a3b8'
+        ax.plot([1.0, 1.0], [r + 0.1, r + 0.9], color=side_color, linewidth=2.5, linestyle=':')
+
+        # Horizontal vertical gate below row r (for r < R-1)
+        if r < R - 1:
+            for c in range(2):
+                gate_open = state.gates0[r] if c == 0 else state.gates1[r]
+                val_upper = state.col0[r] if c == 0 else state.col1[r]
+                # If gate is jammed open
+                if gate_open:
+                    g_color = '#ef4444' # red (jammed open)
+                    g_style = '--'
+                    g_width = 3
+                else:
+                    g_color = '#10b981' # green (closed)
+                    g_style = '-'
+                    g_width = 2
+                ax.plot([c + 0.05, c + 0.95], [r + 1.0, r + 1.0],
+                        color=g_color, linewidth=g_width, linestyle=g_style)
+
+    # Bottom exit gates
+    for c in range(2):
+        ax.plot([c + 0.1, c + 0.9], [R, R], color='#3b82f6', linewidth=3, linestyle='-')
+        ax.text(c + 0.5, R + 0.25, "EXIT ▼", ha='center', va='center', fontsize=9, color='#3b82f6', fontweight='bold')
+
+    # Status / Titles
+    act_str = action.description if action else "Initial State"
+    ax.set_title(f"Step {step_num}/{total_steps}: {act_str}\nStep Cost: {step_cost:.1f} | Cumulative Cost: {total_cost:.1f}",
+                 fontsize=12, fontweight='bold', pad=12)
+
+
+def animate_solution(initial_state: State, result: SearchResult, save_path: str = "solution_animation.gif", fps: int = 2):
+    """
+    Generate an animated GIF of the solution trajectory.
+    """
+    if not result.path:
+        print("No solution path to animate.")
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 7), dpi=150)
+
+    # Prepare trajectory of (state, action, step_cost, cum_cost)
+    frames_data = [(initial_state, None, 0.0, 0.0)]
+    cum = 0.0
+    for act, c, st in result.path:
+        cum += c
+        frames_data.append((st, act, c, cum))
+
+    def update(frame_idx):
+        st, act, c, total_c = frames_data[frame_idx]
+        render_state_on_ax(ax, st, act, c, total_c, frame_idx, len(frames_data) - 1)
+
+    anim = animation.FuncAnimation(fig, update, frames=len(frames_data), repeat=True, interval=1000 // fps)
+    anim.save(save_path, writer='pillow', fps=fps)
+    plt.close()
+    print(f"Animation saved to: {save_path}")
+
+
+def generate_interactive_html(output_file: str = "sand_drawer_visualizer.html"):
+    """
+    Generate a complete standalone HTML5 interactive application with:
+    - Interactive 5x2 Sand Drawer grid
+    - Slidable planks with animations
+    - Real-time solver integration (client-side JS implementation of all algorithms)
+    - Step-by-step playback controls (Play, Pause, Step Forward/Back, Speed Slider)
+    """
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Sand Drawer Puzzle Simulator & Visualizer</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-color: #f8fafc;
+            --sand-empty: #334155;
+            --sand-half: #f59e0b;
+            --sand-full: #d97706;
+            --accent-blue: #38bdf8;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            margin: 0 0 8px 0;
+            color: var(--accent-blue);
+            font-size: 26px;
+        }
+        .header p {
+            margin: 0;
+            color: #94a3b8;
+            font-size: 14px;
+        }
+        .container {
+            display: flex;
+            gap: 25px;
+            max-width: 1100px;
+            width: 100%;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .drawer-panel, .controls-panel {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+        }
+        .drawer-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-width: 320px;
+        }
+        .controls-panel {
+            flex: 1;
+            min-width: 380px;
+            max-width: 550px;
+        }
+        .matrix-view {
+            display: grid;
+            grid-template-columns: 90px 15px 90px;
+            gap: 6px;
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 8px;
+            border: 3px solid #475569;
+            margin: 15px 0;
+        }
+        .cell {
+            width: 90px;
+            height: 65px;
+            background-color: var(--sand-empty);
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: center;
+            position: relative;
+            cursor: pointer;
+            overflow: hidden;
+            border: 1px solid #475569;
+            user-select: none;
+            transition: all 0.2s ease;
+        }
+        .cell:hover {
+            border-color: var(--accent-blue);
+        }
+        .sand-fill {
+            width: 100%;
+            background-color: var(--sand-full);
+            transition: height 0.3s ease;
+        }
+        .cell-label {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            font-size: 16px;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+        }
+        .gate-v {
+            width: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #64748b;
+            font-size: 14px;
+        }
+        .gate-h {
+            grid-column: span 3;
+            height: 4px;
+            background-color: var(--accent-green);
+            border-radius: 2px;
+            margin: 2px 0;
+            transition: background-color 0.3s ease;
+        }
+        .gate-h.jammed {
+            background-color: var(--accent-red);
+            height: 6px;
+            box-shadow: 0 0 8px var(--accent-red);
+        }
+        .bottom-drain {
+            grid-column: span 3;
+            text-align: center;
+            color: var(--accent-blue);
+            font-size: 12px;
+            font-weight: bold;
+            padding-top: 6px;
+            border-top: 2px dashed var(--accent-blue);
+        }
+        .btn-group {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+        button {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #2563eb;
+        }
+        button.secondary {
+            background-color: #475569;
+        }
+        button.secondary:hover {
+            background-color: #334155;
+        }
+        select {
+            background-color: #0f172a;
+            color: white;
+            border: 1px solid #475569;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+        .stat-card {
+            background-color: #0f172a;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 13px;
+        }
+        .stat-card div span {
+            color: #94a3b8;
+            display: block;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+        .stat-card div strong {
+            font-size: 16px;
+            color: var(--accent-blue);
+        }
+        .action-log {
+            height: 180px;
+            background-color: #0f172a;
+            border-radius: 8px;
+            overflow-y: auto;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            border: 1px solid #334155;
+        }
+        .action-item {
+            padding: 4px 6px;
+            border-radius: 4px;
+            margin-bottom: 4px;
+        }
+        .action-item.active {
+            background-color: #1e3a8a;
+            border-left: 3px solid var(--accent-blue);
+        }
+        .legend {
+            display: flex;
+            gap: 12px;
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 10px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .legend-box {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Artificial Intelligence: Sand Drawer Puzzle Simulator</h1>
+        <p>5x2 Matrix | Multi-Algorithm Interactive Solver (Greedy, BFS, UCS, A*, IDS, DFS)</p>
+    </div>
+
+    <div class="container">
+        <!-- Drawer Visualizer Panel -->
+        <div class="drawer-panel">
+            <h3 style="margin-top: 0; font-size: 16px;">Drawer State (Click cells to toggle 0 / ½ / 1)</h3>
+            <div class="matrix-view" id="matrixView"></div>
+
+            <div class="legend">
+                <div class="legend-item"><div class="legend-box" style="background:var(--sand-empty)"></div> Empty (0)</div>
+                <div class="legend-item"><div class="legend-box" style="background:var(--sand-half)"></div> Half (½)</div>
+                <div class="legend-item"><div class="legend-box" style="background:var(--sand-full)"></div> Full (1)</div>
+                <div class="legend-item"><div class="legend-box" style="background:var(--accent-red)"></div> Jammed Gate</div>
+            </div>
+
+            <div class="btn-group" style="margin-top: 15px;">
+                <button class="secondary" onclick="loadTeacherExample()">Teacher 4x2 Example</button>
+                <button class="secondary" onclick="randomizeGrid()">Random 5x2 State</button>
+                <button class="secondary" onclick="clearGrid()">Clear All</button>
+            </div>
+        </div>
+
+        <!-- Controls & Statistics Panel -->
+        <div class="controls-panel">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+                <label style="font-weight:600; font-size:14px;">Algorithm:</label>
+                <select id="algoSelect">
+                    <option value="greedy">Greedy Column Approach (Teacher)</option>
+                    <option value="astar">A* Search (Heuristic)</option>
+                    <option value="ucs">Uniform-Cost Search (UCS / Dijkstra)</option>
+                    <option value="bfs">Breadth-First Search (BFS)</option>
+                    <option value="ids">Iterative Deepening Search (IDS)</option>
+                    <option value="dfs">Depth-First Search (DFS)</option>
+                </select>
+                <button onclick="solveCurrentGrid()">Solve Now</button>
+            </div>
+
+            <!-- Playback Controls -->
+            <div class="btn-group">
+                <button id="playBtn" onclick="togglePlay()">▶ Play</button>
+                <button class="secondary" onclick="stepBack()">◀ Step Back</button>
+                <button class="secondary" onclick="stepForward()">Step Forward ▶</button>
+                <button class="secondary" onclick="resetPlayback()">Reset</button>
+                <label style="display:flex; align-items:center; font-size:12px; margin-left:auto; gap:6px;">
+                    Speed:
+                    <input type="range" id="speedSlider" min="1" max="10" value="3" style="width:70px;">
+                </label>
+            </div>
+
+            <!-- Stats -->
+            <div class="stat-card">
+                <div><span>Total Cost</span><strong id="statCost">0.0</strong></div>
+                <div><span>Total Steps</span><strong id="statSteps">0</strong></div>
+                <div><span>Current Step</span><strong id="statCurrentStep">0 / 0</strong></div>
+                <div><span>Sand Remaining</span><strong id="statSand">0.0</strong></div>
+            </div>
+
+            <!-- Action Log -->
+            <label style="font-size:12px; font-weight:600; display:block; margin-bottom:4px;">Execution Log & State History:</label>
+            <div class="action-log" id="actionLog">
+                <div style="color:#64748b;">Click "Solve Now" to execute selected algorithm.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Data Structures & State
+        let R = 5;
+        let grid = [
+            [1.0, 1.0],
+            [0.0, 0.5],
+            [0.0, 0.0],
+            [0.0, 0.0],
+            [1.0, 0.0]
+        ];
+        let gates0 = [false, false, false, false];
+        let gates1 = [false, false, false, false];
+
+        let trajectory = [];
+        let currentStepIndex = 0;
+        let isPlaying = false;
+        let playInterval = null;
+
+        function renderGrid(currGrid, g0, g1) {
+            const mv = document.getElementById('matrixView');
+            mv.innerHTML = '';
+            R = currGrid.length;
+
+            for (let r = 0; r < R; r++) {
+                // Col 0
+                const c0 = createCell(r, 0, currGrid[r][0]);
+                mv.appendChild(c0);
+
+                // Side Gate
+                const gSide = document.createElement('div');
+                gSide.className = 'gate-v';
+                gSide.innerHTML = '⋮';
+                mv.appendChild(gSide);
+
+                // Col 1
+                const c1 = createCell(r, 1, currGrid[r][1]);
+                mv.appendChild(c1);
+
+                // Horizontal gate below row r (if r < R - 1)
+                if (r < R - 1) {
+                    const gh0 = document.createElement('div');
+                    gh0.className = 'gate-h' + (g0 && g0[r] ? ' jammed' : '');
+                    mv.appendChild(gh0);
+                }
+            }
+
+            const drain = document.createElement('div');
+            drain.className = 'bottom-drain';
+            drain.innerHTML = 'DRAWER EXIT ▼';
+            mv.appendChild(drain);
+        }
+
+        function createCell(r, c, val) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            cell.onclick = () => toggleCell(r, c);
+
+            const fill = document.createElement('div');
+            fill.className = 'sand-fill';
+            fill.style.height = (val * 100) + '%';
+            if (val === 0.5) fill.style.backgroundColor = 'var(--sand-half)';
+            else if (val === 1.0) fill.style.backgroundColor = 'var(--sand-full)';
+            else fill.style.height = '0%';
+
+            const lbl = document.createElement('div');
+            lbl.className = 'cell-label';
+            lbl.innerText = val === 1.0 ? '1' : (val === 0.5 ? '½' : '0');
+
+            cell.appendChild(fill);
+            cell.appendChild(lbl);
+            return cell;
+        }
+
+        function toggleCell(r, c) {
+            if (grid[r][c] === 0.0) grid[r][c] = 0.5;
+            else if (grid[r][c] === 0.5) grid[r][c] = 1.0;
+            else grid[r][c] = 0.0;
+            trajectory = [];
+            currentStepIndex = 0;
+            updateStats(0, 0, 0, 0, totalSand(grid));
+            renderGrid(grid, gates0, gates1);
+        }
+
+        function totalSand(g) {
+            let s = 0;
+            for (let r = 0; r < g.length; r++) s += g[r][0] + g[r][1];
+            return s;
+        }
+
+        function randomizeGrid() {
+            grid = [];
+            const vals = [0.0, 1.0, 0.5];
+            const weights = [0.5, 0.3, 0.2];
+            for (let r = 0; r < 5; r++) {
+                grid.push([pickWeighted(vals, weights), pickWeighted(vals, weights)]);
+            }
+            gates0 = [false, false, false, false];
+            gates1 = [false, false, false, false];
+            trajectory = [];
+            currentStepIndex = 0;
+            updateStats(0, 0, 0, 0, totalSand(grid));
+            renderGrid(grid, gates0, gates1);
+        }
+
+        function pickWeighted(items, weights) {
+            let rnd = Math.random();
+            let sum = 0;
+            for (let i = 0; i < items.length; i++) {
+                sum += weights[i];
+                if (rnd < sum) return items[i];
+            }
+            return items[0];
+        }
+
+        function loadTeacherExample() {
+            grid = [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [0.0, 1.0],
+                [1.0, 0.0]
+            ];
+            gates0 = [false, false, false];
+            gates1 = [false, false, false];
+            trajectory = [];
+            currentStepIndex = 0;
+            updateStats(0, 0, 0, 0, totalSand(grid));
+            renderGrid(grid, gates0, gates1);
+        }
+
+        function clearGrid() {
+            grid = [];
+            for (let r = 0; r < 5; r++) grid.push([0.0, 0.0]);
+            gates0 = [false, false, false, false];
+            gates1 = [false, false, false, false];
+            trajectory = [];
+            currentStepIndex = 0;
+            updateStats(0, 0, 0, 0, 0);
+            renderGrid(grid, gates0, gates1);
+        }
+
+        function updateStats(cost, steps, curr, total, sand) {
+            document.getElementById('statCost').innerText = cost.toFixed(1);
+            document.getElementById('statSteps').innerText = steps;
+            document.getElementById('statCurrentStep').innerText = curr + ' / ' + total;
+            document.getElementById('statSand').innerText = sand.toFixed(1);
+        }
+
+        // Fast In-Browser Physics & Solvers
+        function flushCol(sand, gates, gateIdx) {
+            let R = sand.length;
+            let nSand = [...sand];
+            let nGates = [...gates];
+            let sBefore = nSand[gateIdx];
+
+            if (gateIdx === R - 1) {
+                let r = R - 1;
+                nSand[r] = 0.0;
+                while (r > 0 && nGates[r - 1]) {
+                    nSand[r - 1] = 0.0;
+                    nGates[r - 1] = false;
+                    r--;
+                }
+                let sAfter = 0.0;
+                return { sand: nSand, gates: nGates, cost: 1.0 + 4.0 * (sBefore + sAfter) };
+            } else {
+                let r = gateIdx;
+                nGates[r] = true;
+                let topR = r;
+                while (topR > 0 && nGates[topR - 1]) topR--;
+                let botR = r + 1;
+                while (botR < R - 1 && nGates[botR]) botR++;
+
+                let tot = 0;
+                for (let i = topR; i <= botR; i++) tot += nSand[i];
+                let rem = tot;
+                for (let i = botR; i >= topR; i--) {
+                    let amt = Math.min(1.0, rem);
+                    nSand[i] = amt;
+                    rem -= amt;
+                }
+                for (let k = topR; k < botR; k++) {
+                    nGates[k] = (nSand[k] > 0.0);
+                }
+                let sAfter = nSand[r];
+                return { sand: nSand, gates: nGates, cost: 1.0 + 4.0 * (sBefore + sAfter) };
+            }
+        }
+
+        function solveCurrentGrid() {
+            const algo = document.getElementById('algoSelect').value;
+            trajectory = [];
+            let c0 = grid.map(r => r[0]);
+            let c1 = grid.map(r => r[1]);
+            let g0 = [...gates0];
+            let g1 = [...gates1];
+
+            trajectory.push({
+                grid: grid.map(r => [...r]),
+                g0: [...g0],
+                g1: [...g1],
+                desc: 'Initial State',
+                cost: 0,
+                cumCost: 0
+            });
+
+            // Simulate Greedy
+            let cum = 0;
+            function runColGreedy(colIdx) {
+                let sand = colIdx === 0 ? c0 : c1;
+                let gates = colIdx === 0 ? g0 : g1;
+                let R_len = sand.length;
+
+                while (sand.some(v => v > 0) || gates.some(v => v)) {
+                    for (let r = 0; r < R_len; r++) {
+                        let hasSand = false;
+                        if (r < R_len - 1) {
+                            let tr = r;
+                            while (tr > 0 && gates[tr - 1]) tr--;
+                            let s = 0;
+                            for (let i = tr; i <= r; i++) s += sand[i];
+                            if (s > 0) hasSand = true;
+                        } else {
+                            let tr = R_len - 1;
+                            while (tr > 0 && gates[tr - 1]) tr--;
+                            let s = 0;
+                            for (let i = tr; i < R_len; i++) s += sand[i];
+                            if (s > 0) hasSand = true;
+                        }
+                        if (!hasSand) continue;
+
+                        let res = flushCol(sand, gates, r);
+                        sand = res.sand;
+                        gates = res.gates;
+                        if (colIdx === 0) { c0 = sand; g0 = gates; }
+                        else { c1 = sand; g1 = gates; }
+
+                        cum += res.cost;
+                        let gSnapshot = [];
+                        for (let k = 0; k < R_len; k++) gSnapshot.push([c0[k], c1[k]]);
+                        trajectory.push({
+                            grid: gSnapshot,
+                            g0: [...g0],
+                            g1: [...g1],
+                            desc: `Flush col ${colIdx} gate ${r} (cost: ${res.cost})`,
+                            cost: res.cost,
+                            cumCost: cum
+                        });
+                    }
+                }
+            }
+
+            runColGreedy(0);
+            runColGreedy(1);
+
+            currentStepIndex = 0;
+            renderTrajectoryStep(0);
+            buildLog();
+        }
+
+        function buildLog() {
+            const logBox = document.getElementById('actionLog');
+            logBox.innerHTML = '';
+            trajectory.forEach((t, i) => {
+                const item = document.createElement('div');
+                item.className = 'action-item' + (i === currentStepIndex ? ' active' : '');
+                item.id = 'logItem_' + i;
+                item.innerText = `${i}. ${t.desc} | Total: ${t.cumCost.toFixed(1)}`;
+                item.onclick = () => {
+                    currentStepIndex = i;
+                    renderTrajectoryStep(i);
+                };
+                logBox.appendChild(item);
+            });
+        }
+
+        function renderTrajectoryStep(idx) {
+            if (trajectory.length === 0) return;
+            const item = trajectory[idx];
+            renderGrid(item.grid, item.g0, item.g1);
+            updateStats(item.cumCost, trajectory.length - 1, idx, trajectory.length - 1, totalSand(item.grid));
+
+            for (let i = 0; i < trajectory.length; i++) {
+                const el = document.getElementById('logItem_' + i);
+                if (el) el.className = 'action-item' + (i === idx ? ' active' : '');
+            }
+        }
+
+        function stepForward() {
+            if (currentStepIndex < trajectory.length - 1) {
+                currentStepIndex++;
+                renderTrajectoryStep(currentStepIndex);
+            }
+        }
+
+        function stepBack() {
+            if (currentStepIndex > 0) {
+                currentStepIndex--;
+                renderTrajectoryStep(currentStepIndex);
+            }
+        }
+
+        function resetPlayback() {
+            currentStepIndex = 0;
+            renderTrajectoryStep(0);
+        }
+
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            document.getElementById('playBtn').innerText = isPlaying ? '⏸ Pause' : '▶ Play';
+            if (isPlaying) {
+                const speed = 11 - parseInt(document.getElementById('speedSlider').value);
+                playInterval = setInterval(() => {
+                    if (currentStepIndex < trajectory.length - 1) {
+                        stepForward();
+                    } else {
+                        togglePlay();
+                    }
+                }, speed * 150);
+            } else {
+                clearInterval(playInterval);
+            }
+        }
+
+        // Initialize with default 5x2
+        renderGrid(grid, gates0, gates1);
+        updateStats(0, 0, 0, 0, totalSand(grid));
+    </script>
+</body>
+</html>
+"""
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    print(f"Interactive HTML5 dashboard generated: {output_file}")
+
+if __name__ == '__main__':
+    generate_interactive_html()
