@@ -1,0 +1,1 @@
+C:\Users\mogho\AppData\Local\Programs\Python\Python313\python.exe: can't open file "D:\\Bachelor's\\Term": [Errno 2] No such file or directory
