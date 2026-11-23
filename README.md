@@ -13,3 +13,21 @@ python evaluate_phase2.py 30
 See [PHASE2_DOCUMENTATION.md](PHASE2_DOCUMENTATION.md) for design and [REPORT.md](REPORT.md) for metric definitions, current training evidence, and reproducibility notes. The exact-optimal training labels are cached in `phase2_labels.npz`; the exhaustive phase 1 result cache is `all_59049_results.pkl`.
 
 The model calibration is empirical and does not prove admissibility on unseen states. Refer to the report for this limitation and the current model's poor fit.
+
+## Genetic search over action sequences
+
+The workshop genetic algorithm treats each chromosome as a fixed-length list of
+sand-drawer actions. Every chromosome is replayed from the same initial board;
+replay stops at the first goal. Unsuccessful chromosomes are ranked by their
+lowest conflict number reached (remaining sand plus open gates) and path cost.
+Illegal actions score zero. The default sequence length is 30, and the population
+size must be even.
+
+```powershell
+python main.py --genetic --population-size 60 --sequence-length 30 --generations 200 --seed 42
+```
+
+The scoring and operators can also be used directly from `genetic_search.py`:
+`evaluate_sequence`, `successful_path`, `conflict_number`, and `genetic_search`.
+The successful-path bonus is a hyperparameter (`success_bonus`, default 1000);
+unsuccessful fitness uses the best conflict and accumulated path cost.

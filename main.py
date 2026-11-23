@@ -29,6 +29,7 @@ from heuristics import h_gravity, h0, h_exit_bound
 from search_algorithms import (
     bfs, dfs, ids, ucs, greedy_column_search, astar, rbfs, SearchResult
 )
+from genetic_search import genetic_search
 from visualizer import animate_solution, generate_interactive_html
 
 def print_separator(title: str = "", char: str = "=", length: int = 75):
@@ -161,6 +162,29 @@ def run_benchmarks(num_states: int = 5):
         print(f"{name:<12s} | {c:<10.2f} | {s:<10.2f} | {n:<12.1f} | {t:<12.2f} ms", flush=True)
 
 
+def run_genetic_example(seed: int = 42, population_size: int = 60,
+                        sequence_length: int = 30, generations: int = 200):
+    """Run sequence-based genetic search on the seeded 5x2 puzzle state."""
+    print_separator("GENETIC SEARCH (ACTION SEQUENCES)")
+    state = create_random_state(rows=5, seed=seed)
+    print(state, flush=True)
+    result = genetic_search(
+        state,
+        population_size=population_size,
+        sequence_length=sequence_length,
+        generations=generations,
+        seed=seed,
+    )
+    print(f"Generations: {result.generations} | Best fitness: {result.best_fitness:.4f} | "
+          f"Best conflict: {result.best_conflict:.2f}", flush=True)
+    if result.solution is None:
+        print("No solution found within the configured generations.", flush=True)
+    else:
+        print(f"Solution cost: {result.cost:.1f} | Actions: {len(result.solution)}", flush=True)
+        for i, action in enumerate(result.solution, 1):
+            print(f"  {i:2d}. {action.description}", flush=True)
+
+
 def run_visualizer_demo():
     """
     Generate the animated GIF and HTML5 visualizer.
@@ -190,6 +214,11 @@ def main():
     parser.add_argument("--compare", action="store_true", help="Benchmark algorithms on multiple states")
     parser.add_argument("--visualize", action="store_true", help="Generate GIF animation and HTML dashboard")
     parser.add_argument("--batch", action="store_true", help="Run full 59,049 state analysis")
+    parser.add_argument("--genetic", action="store_true", help="Run genetic search over action sequences")
+    parser.add_argument("--population-size", type=int, default=60, help="Even genetic population size")
+    parser.add_argument("--sequence-length", type=int, default=30, help="Maximum actions per chromosome")
+    parser.add_argument("--generations", type=int, default=200, help="Maximum genetic generations")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for puzzle and genetic search")
     parser.add_argument("--all", action="store_true", help="Run all features")
 
     args = parser.parse_args()
@@ -212,6 +241,9 @@ def main():
         if args.batch:
             from analysis_59049 import run_full_analysis
             run_full_analysis()
+        if args.genetic:
+            run_genetic_example(args.seed, args.population_size,
+                                args.sequence_length, args.generations)
 
 if __name__ == '__main__':
     main()
