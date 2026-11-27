@@ -51,10 +51,10 @@ def _gene(action: Action) -> Gene:
 
 
 def conflict_number(state: State) -> float:
-    """A simple goal-distance estimate: sand remaining plus open gates."""
-    sand = sum(state.col0) + sum(state.col1)
+    """Count occupied cells and open internal gates; zero exactly at the goal."""
+    occupied_cells = sum(value > 0.0 for value in state.col0 + state.col1)
     open_gates = sum(state.gates0) + sum(state.gates1)
-    return sand + open_gates
+    return float(occupied_cells + open_gates)
 
 
 def evaluate_sequence(
@@ -106,6 +106,8 @@ def evaluate_sequence(
 def successful_path(initial: State, chromosome: Sequence[Optional[Gene]]) -> bool:
     """Sequence-based goal test: does replay reach a goal before it ends?"""
     # Keep this predicate separate from State.is_goal(), which tests a board.
+    if initial.is_goal():
+        return True
     state = initial
     for gene in chromosome:
         if gene is STOP:

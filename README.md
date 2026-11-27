@@ -31,3 +31,22 @@ The scoring and operators can also be used directly from `genetic_search.py`:
 `evaluate_sequence`, `successful_path`, `conflict_number`, and `genetic_search`.
 The successful-path bonus is a hyperparameter (`success_bonus`, default 1000);
 unsuccessful fitness uses the best conflict and accumulated path cost.
+
+## Assignment report and evaluation
+
+See [GA_PROJECT_REPORT.md](GA_PROJECT_REPORT.md) for the seven design steps,
+fitness rationale, genetic operators, and evaluation protocol. Run the required
+100 distinct-instance comparison against exact UCS with:
+
+```powershell
+./run_ga_evaluation.ps1
+```
+
+Or configure it directly with `python evaluate_genetic.py --trials 100 ...`.
+The run writes a per-instance CSV, a JSON summary, and a Markdown report under
+`ga_evaluation/`.
+
+Recorded run (seed `20261127`, 100 distinct boards): GA solved 100/100, matched
+UCS cost on 9/100, and had a mean cost ratio of 1.160454. See
+[`ga_evaluation/GENETIC_EVALUATION.md`](ga_evaluation/GENETIC_EVALUATION.md)
+and its per-instance CSV for the full results.

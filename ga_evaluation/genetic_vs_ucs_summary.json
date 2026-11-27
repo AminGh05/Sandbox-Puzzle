@@ -1,0 +1,21 @@
+{
+  "trials": 100,
+  "distinct_initial_states": 100,
+  "ga_successes": 100,
+  "ga_success_rate_percent": 100.0,
+  "optimal_cost_matches": 9,
+  "optimal_matches_percent_of_ga_successes": 9.0,
+  "optimal_matches_percent_of_all_trials": 9.0,
+  "mean_cost_ratio_all_trials_failed_as_infinity": 1.160454058439349,
+  "mean_cost_ratio_successful_trials": 1.160454058439349,
+  "mean_ga_seconds": 3.1594419329998344,
+  "mean_ucs_seconds": 2.335458538999956,
+  "ga_configuration": {
+    "population_size": 60,
+    "sequence_length": 30,
+    "generations": 200,
+    "mutation_rate": 0.12,
+    "seed": 20261127
+  },
+  "ratio_convention": "A failed GA run has no solution path_cost, so its ratio is +Infinity. The all-trial arithmetic mean is therefore +Infinity if any run fails. The finite conditional mean is reported separately over GA successes. If both GA and UCS cost zero for an already-solved initial state, the 0/0 ratio is defined as 1.0 because the costs match exactly."
+}
